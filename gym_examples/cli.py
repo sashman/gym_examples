@@ -8,9 +8,9 @@ Be creative! do whatever you want!
 - Import things from your .base module
 """
 
-import gymnasium
-import gym_examples
+from gym_examples.warhammer40k.model.model import run
+
 
 def main():  # pragma: no cover
 
-    env = gymnasium.make('gymnasium_env/Warhammer40k-v0')
+    run()
