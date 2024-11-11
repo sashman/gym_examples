@@ -1,0 +1,1 @@
+from gym_examples.warhammer40k.envs.warhammer40k import Warhammer40kEnv

@@ -8,21 +8,9 @@ Be creative! do whatever you want!
 - Import things from your .base module
 """
 
+import gymnasium
+import gym_examples
 
 def main():  # pragma: no cover
-    """
-    The main function executes on commands:
-    `python -m gym_examples` and `$ gym_examples `.
 
-    This is your program's entry point.
-
-    You can change this function to do whatever you want.
-    Examples:
-        * Run a test suite
-        * Run a server
-        * Do some other stuff
-        * Run a command line application (Click, Typer, ArgParse)
-        * List all available tasks
-        * Run an application (Flask, FastAPI, Django, etc.)
-    """
-    print("This will do something")
+    env = gymnasium.make('gymnasium_env/Warhammer40k-v0')
