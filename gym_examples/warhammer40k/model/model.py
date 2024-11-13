@@ -7,8 +7,13 @@ from logging import getLogger
 logger = getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
+from tqdm import tqdm
+import plotly.express as px
+
+
 import torch
 import torch.nn as nn
+from torch.nn.functional import mse_loss
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -84,39 +89,68 @@ def run():
     
     p_random_action = 0.1
     
+    all_states = []
+    all_actions = []
+    all_rewards = []
+    all_next_states = []
+    
+    logging.debug("Playing games")
     for i in range(1000):
         states, actions, rewards, next_states =  play_game(env, DEVICE, flattened_obs_dim, model, p_random_action)
-        logging.debug(f"mean reward: {rewards.mean()}")
+        
+        # append to all 
+        all_states.extend(states)
+        all_actions.extend(actions)
+        all_rewards.extend(rewards)
+        all_next_states.extend(next_states)
+    
+    all_states = torch.stack(all_states)
+    all_actions = torch.stack(all_actions)
+    all_rewards = torch.stack(all_rewards)
+    all_next_states = torch.stack(all_next_states)
+        
+    logging.debug(f"mean reward: {all_rewards.mean()}")
         
         
     gamma = 0.1
     with torch.no_grad():
-        q_values = model(next_states).to(DEVICE)
+        q_values = model(all_next_states).to(DEVICE)
         max_q_values, _ = q_values.max(dim=1)
-        expected_future_rewards = rewards + gamma * max_q_values
-
+        expected_future_rewards = all_rewards + gamma * max_q_values
+        
 
     # train
-    num_epochs = 4
-    batch_size = 32
+    num_epochs = 10000
+    batch_size = 64
     all_losses = []
-    for epoch in range(num_epochs):
-        shuffled_indices = torch.randperm(states.size(0))
-        states = states[shuffled_indices]
-        actions = actions[shuffled_indices]
+    
+    pbar = tqdm(range(num_epochs))
+    for epoch in pbar:
+                
+        shuffled_indices = torch.randperm(states.shape[0])
+        states = all_states[shuffled_indices]
+        actions = all_actions[shuffled_indices]
         expected_future_rewards = expected_future_rewards[shuffled_indices]
-        
-        for state, action, expected_future_reward in zip(states.split(batch_size), actions.split(batch_size), expected_future_rewards.split(batch_size)):
-            logger.debug(f"state: {state}")
+
+        for state, action, expected_future_reward in zip(
+            states.split(batch_size),
+            actions.split(batch_size),
+            expected_future_rewards.split(batch_size)
+            ):
             
             q_value = model(state)
+                        
+            reward_index = action.view(-1, 1).long()
+                        
+            predicted_future_rewards = q_value.gather(1, reward_index).view(-1)
+            loss = mse_loss(predicted_future_rewards, expected_future_reward)
+            all_losses.append(loss.detach())
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
             
-            logger.debug(f"q_value: {q_value}")
-        #     loss = (q_value - expected_future_reward).pow(2)
-        #     optimizer.zero_grad()
-        #     loss.backward()
-        #     optimizer.step()
-        #     all_losses.append(loss.item())
-            
-        # all_losses = torch.stack(all_losses)
-        # logger.debug(f"epoch: {epoch}, loss: {all_losses.mean()}")
+        pbar.set_description(f"Epoch {epoch} mean loss: {torch.stack(all_losses).mean()}")
+    
+    data = torch.stack(all_losses).detach().cpu().numpy()
+    fig = px.line(data).update_layout(xaxis_title="Epoch", yaxis_title="MSE Loss")
+    fig.show()
