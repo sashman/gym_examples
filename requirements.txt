@@ -11,3 +11,5 @@ torch
 tqdm
 plotly==5.24.1
 pandas
+matplotlib
+typer

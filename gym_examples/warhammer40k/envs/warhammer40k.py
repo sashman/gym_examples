@@ -13,7 +13,7 @@ class Actions(Enum):
 
 
 class Warhammer40kEnv(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 10}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 5}
 
     def __init__(self, render_mode=None, size=5):
         self.size = size  # The size of the square grid
@@ -56,6 +56,9 @@ class Warhammer40kEnv(gym.Env):
         """
         self.window = None
         self.clock = None
+        
+        self.current_turn = 0  # Initialize the current turn to 0
+        self.max_turns = 100  # Set the maximum number of turns
 
     def _get_obs(self):
         return {"agent": self._agent_location, "target": self._target_location}
@@ -89,7 +92,7 @@ class Warhammer40kEnv(gym.Env):
             self._render_frame()
 
         return observation, info
-
+    
     def step(self, action):
         # Map the action (element of {0,1,2,3}) to the direction we walk in
         direction = self._action_to_direction[action]
@@ -99,13 +102,25 @@ class Warhammer40kEnv(gym.Env):
         )
         # An episode is done iff the agent has reached the target
         terminated = np.array_equal(self._agent_location, self._target_location)
-        reward = 1 if terminated else 0  # Binary sparse rewards
+        
+        # reward is the inverse of the distance to the target
+        # We use `np.linalg.norm` to compute the distance in L1-norm
+        reward = -np.linalg.norm(
+            self._agent_location - self._target_location, ord=1
+        )
+        
+        
+        # reward = 1 if terminated else 0  # Binary sparse rewards
         observation = self._get_obs()
         info = self._get_info()
 
         if self.render_mode == "human":
             self._render_frame()
 
+        self.current_turn += 1  # Increment the current turn
+        if self.current_turn >= self.max_turns:
+            terminated = True
+            
         return observation, reward, terminated, False, info
 
     def render(self):

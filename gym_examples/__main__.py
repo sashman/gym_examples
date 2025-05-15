@@ -2,5 +2,7 @@
 
 from gym_examples.cli import main  # pragma: no cover
 
+import typer
+
 if __name__ == "__main__":  # pragma: no cover
-    main()
+    typer.run(main)

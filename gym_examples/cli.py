@@ -8,9 +8,14 @@ Be creative! do whatever you want!
 - Import things from your .base module
 """
 
-from gym_examples.warhammer40k.model.model import run
+from gym_examples.warhammer40k.model.dqn.agent import Agent
 
 
-def main():  # pragma: no cover
+def main(hyperparameters: str, train: bool, render: bool):  # pragma: no cover
 
-    run()
+    dql = Agent(hyperparameter_set=hyperparameters)
+
+    if train:
+        dql.run(is_training=True, render=render)
+    else:
+        dql.run(is_training=False, render=render)
