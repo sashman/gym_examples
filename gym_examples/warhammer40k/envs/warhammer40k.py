@@ -15,9 +15,9 @@ class Actions(Enum):
 class Warhammer40kEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 5}
 
-    def __init__(self, render_mode=None, size=5):
+    def __init__(self, render_mode=None, size=50):
         self.size = size  # The size of the square grid
-        self.window_size = 512  # The size of the PyGame window
+        self.window_size = 1024  # The size of the PyGame window
 
         # Observations are dictionaries with the agent's and the target's location.
         # Each location is encoded as an element of {0, ..., `size`}^2,
@@ -67,7 +67,9 @@ class Warhammer40kEnv(gym.Env):
         return {
             "distance": np.linalg.norm(
                 self._agent_location - self._target_location, ord=1
-            )
+            ),
+            "current_turn": self.current_turn,
+            "max_turns": self.max_turns,
         }
 
     def reset(self, seed=None, options=None):
@@ -75,23 +77,40 @@ class Warhammer40kEnv(gym.Env):
         super().reset(seed=seed)
 
         # Choose the agent's location uniformly at random
-        self._agent_location = self.np_random.integers(0, self.size, size=2, dtype=int)
+        # self._agent_location = self.np_random.integers(0, self.size, size=2, dtype=int)
+        # set agent location to a fixed position in the middle of the grid, top left corner
+        self._agent_location = np.array([0, 0], dtype=int)
+        
 
         # We will sample the target's location randomly until it does not
         # coincide with the agent's location
-        self._target_location = self._agent_location
-        while np.array_equal(self._target_location, self._agent_location):
-            self._target_location = self.np_random.integers(
-                0, self.size, size=2, dtype=int
-            )
+        # self._target_location = self._agent_location
+        # while np.array_equal(self._target_location, self._agent_location):
+        #     self._target_location = self.np_random.integers(
+        #         0, self.size, size=2, dtype=int
+        #     )
+        
+        # set target location to a fixed position in the middle of the grid
+        self._target_location = np.array([self.size // 2, self.size // 2], dtype=int)
 
         observation = self._get_obs()
         info = self._get_info()
 
         if self.render_mode == "human":
             self._render_frame()
+            
+        self.current_turn = 0  # Reset the current turn to 0
 
         return observation, info
+    
+    def _calculate_reward(self):
+        """Calculate the reward based on the agent's and target's locations."""
+        
+        # reward is the inverse of the distance to the target
+        # We use `np.linalg.norm` to compute the distance in L1-norm
+        return -np.linalg.norm(
+            self._agent_location - self._target_location, ord=1
+        )
     
     def step(self, action):
         # Map the action (element of {0,1,2,3}) to the direction we walk in
@@ -103,12 +122,7 @@ class Warhammer40kEnv(gym.Env):
         # An episode is done iff the agent has reached the target
         terminated = np.array_equal(self._agent_location, self._target_location)
         
-        # reward is the inverse of the distance to the target
-        # We use `np.linalg.norm` to compute the distance in L1-norm
-        reward = -np.linalg.norm(
-            self._agent_location - self._target_location, ord=1
-        )
-        
+        reward = self._calculate_reward()
         
         # reward = 1 if terminated else 0  # Binary sparse rewards
         observation = self._get_obs()

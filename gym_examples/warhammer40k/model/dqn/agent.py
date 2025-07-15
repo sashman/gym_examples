@@ -75,6 +75,9 @@ class Agent():
         self.GRAPH_FILE = os.path.join(RUNS_DIR, f'{self.hyperparameter_set}.png')
 
     def run(self, is_training=True, render=False):
+        
+        loss = []
+        
         if is_training:
             start_time = datetime.now()
             last_graph_update_time = start_time
@@ -134,7 +137,7 @@ class Agent():
         # Train INDEFINITELY, manually stop the run when you are satisfied (or unsatisfied) with the results
         for episode in itertools.count():
 
-            print(f"Episode: {episode}")
+            
             state, _ = env.reset()  # Initialize environment. Reset returns (state,info).
             state = torch.tensor(self.flatten_state(state), dtype=torch.float, device=device) # Convert state to tensor directly on device
 
@@ -158,6 +161,9 @@ class Agent():
                         # state.unsqueeze(dim=0): Pytorch expects a batch layer, so add batch dimension i.e. tensor([1, 2, 3]) unsqueezes to tensor([[1, 2, 3]])
                         # policy_dqn returns tensor([[1], [2], [3]]), so squeeze it to tensor([1, 2, 3]).
                         # argmax finds the index of the largest element.
+                        state_input = state.unsqueeze(dim=0)
+                        # logger.info(f"State input: {state_input}")
+                        
                         action = policy_dqn(state.unsqueeze(dim=0)).squeeze().argmax()
 
                 # Execute action. Truncated and info is not used.
@@ -195,17 +201,12 @@ class Agent():
                     torch.save(policy_dqn.state_dict(), self.MODEL_FILE)
                     best_reward = episode_reward
 
-
-                # Update graph every x seconds
-                current_time = datetime.now()
-                if current_time - last_graph_update_time > timedelta(seconds=10):
-                    self.save_graph(rewards_per_episode, epsilon_history)
-                    last_graph_update_time = current_time
-
                 # If enough experience has been collected
                 if len(memory)>self.mini_batch_size:
                     mini_batch = memory.sample(self.mini_batch_size)
-                    self.optimize(mini_batch, policy_dqn, target_dqn)
+                    current_losses = self.optimize(mini_batch, policy_dqn, target_dqn)
+                    average_loss = np.mean(current_losses)
+                    loss.append(average_loss)
 
                     # Decay epsilon
                     epsilon = max(epsilon * self.epsilon_decay, self.epsilon_min)
@@ -215,31 +216,44 @@ class Agent():
                     if step_count > self.network_sync_rate:
                         target_dqn.load_state_dict(policy_dqn.state_dict())
                         step_count=0
+                        
+                            # Update graph every x seconds
+                current_time = datetime.now()
+                if current_time - last_graph_update_time > timedelta(seconds=10):
+                    self.save_graph(rewards_per_episode, epsilon_history, loss)
+                    last_graph_update_time = current_time
+                    
 
     def flatten_state(self, state):
         agent = state["agent"]
         target = state["target"]
         return [agent[0], agent[1], target[0], target[1]]
     
-    def save_graph(self, rewards_per_episode, epsilon_history):
+    def save_graph(self, rewards_per_episode, epsilon_history, loss):
         # Save plots
-        fig = plt.figure(1)
+        fig = plt.figure(1, figsize=(12, 8), dpi=100)
 
         # Plot average rewards (Y-axis) vs episodes (X-axis)
         mean_rewards = np.zeros(len(rewards_per_episode))
         for x in range(len(mean_rewards)):
             mean_rewards[x] = np.mean(rewards_per_episode[max(0, x-99):(x+1)])
-        plt.subplot(121) # plot on a 1 row x 2 col grid, at cell 1
+        plt.subplot(221) # plot on a 1 row x 2 col grid, at cell 1
         # plt.xlabel('Episodes')
         plt.ylabel('Mean Rewards')
         plt.plot(mean_rewards)
 
         # Plot epsilon decay (Y-axis) vs episodes (X-axis)
-        plt.subplot(122) # plot on a 1 row x 2 col grid, at cell 2
+        plt.subplot(222) # plot on a 1 row x 2 col grid, at cell 2
         # plt.xlabel('Time Steps')
         plt.ylabel('Epsilon Decay')
         plt.plot(epsilon_history)
-
+        
+        # Plot loss (Y-axis) vs episodes (X-axis)
+        plt.subplot(2,2,(3, 4))
+        plt.xlabel('Episodes')
+        plt.ylabel('Loss')
+        plt.plot(loss)
+        
         plt.subplots_adjust(wspace=1.0, hspace=1.0)
 
         # Save plots
@@ -295,4 +309,5 @@ class Agent():
         self.optimizer.zero_grad()  # Clear gradients
         loss.backward()             # Compute gradients
         self.optimizer.step()       # Update network parameters i.e. weights and biases
+        return loss.item()  # Return the loss value for logging or monitoring
 
