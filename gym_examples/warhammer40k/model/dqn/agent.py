@@ -1,5 +1,6 @@
 import logging
 from logging import getLogger
+from gym_examples.warhammer40k.envs.warhammer40k import Warhammer40kEnv
 from gym_examples.warhammer40k.model.dqn.dqn import DQN
 from gym_examples.warhammer40k.model.dqn.experience_replay import ReplayMemory
 import gymnasium as gym
@@ -61,7 +62,7 @@ class Agent():
         self.epsilon_decay      = hyperparameters['epsilon_decay']          # epsilon decay rate
         self.epsilon_min        = hyperparameters['epsilon_min']            # minimum epsilon value
         self.stop_on_reward     = hyperparameters['stop_on_reward']         # stop training after reaching this number of rewards
-        self.fc1_nodes          = hyperparameters['fc1_nodes']
+        self.hidden_dim         = hyperparameters['hidden_dim']
         self.env_make_params    = hyperparameters.get('env_make_params',{}) # Get optional environment-specific parameters, default to empty dict
         self.enable_double_dqn  = hyperparameters['enable_double_dqn']      # double dqn on/off flag
 
@@ -105,7 +106,7 @@ class Agent():
         rewards_per_episode = []
 
         # Create policy and target network. Number of nodes in the hidden layer can be adjusted.
-        self.policy_dqn = DQN(num_states, num_actions, self.fc1_nodes).to(device)
+        self.policy_dqn = DQN(num_states, num_actions, self.hidden_dim).to(device)
 
         if is_training:
             # Initialize epsilon
@@ -115,7 +116,7 @@ class Agent():
             memory = ReplayMemory(self.replay_memory_size)
 
             # Create the target network and make it identical to the policy network
-            target_dqn = DQN(num_states, num_actions, self.fc1_nodes).to(device)
+            target_dqn = DQN(num_states, num_actions, self.hidden_dim).to(device)
             target_dqn.load_state_dict(self.policy_dqn.state_dict())
 
             # Policy network optimizer. "Adam" optimizer can be swapped to something else.
@@ -142,7 +143,7 @@ class Agent():
 
             
             state, _ = env.reset()  # Initialize environment. Reset returns (state,info).
-            state = torch.tensor(self.flatten_state(state), dtype=torch.float, device=device) # Convert state to tensor directly on device
+            tensor_state = self.to_tensor_state(state, env) # Convert state to tensor directly on device
 
             terminated = False      # True when agent reaches goal or fails
             episode_reward = 0.0    # Used to accumulate rewards per episode
@@ -167,7 +168,7 @@ class Agent():
                         # state_input = state.unsqueeze(dim=0)
                         # logger.info(f"State input: {state_input}")
                         
-                        action = self.policy_dqn(state.unsqueeze(dim=0)).squeeze().argmax()
+                        action = self.policy_dqn(tensor_state.unsqueeze(dim=0)).squeeze().argmax()
 
                 # Execute action. Truncated and info is not used.
                 new_state, reward, terminated, truncated, info = env.step(action.item())
@@ -177,18 +178,18 @@ class Agent():
                 episode_reward += reward
 
                 # Convert new state and reward to tensors on device
-                new_state = torch.tensor(self.flatten_state(new_state), dtype=torch.float, device=device)
+                new_tensor_state = self.to_tensor_state(new_state, env)
                 reward = torch.tensor(reward, dtype=torch.float, device=device)
 
                 if is_training:
                     # Save experience into memory
-                    memory.append((state, action, new_state, reward, terminated))
+                    memory.append((tensor_state, action, new_tensor_state, reward, terminated))
 
                     # Increment step counter
                     step_count+=1
 
                 # Move to the next state
-                state = new_state
+                tensor_state = new_tensor_state
 
             # Keep track of the rewards collected per episode.
             rewards_per_episode.append(episode_reward)
@@ -227,7 +228,7 @@ class Agent():
                     self.save_graph(rewards_per_episode, epsilon_history, loss, env)
                     last_graph_update_time = current_time
                     
-    def compute_policy_on_grid(self, env) -> tuple[np.ndarray, np.ndarray]:
+    def compute_policy_on_grid(self, env: Warhammer40kEnv) -> tuple[np.ndarray, np.ndarray]:
         box_agent = env.observation_space["agent"]
         x_min, y_min = box_agent.low
         x_max, y_max = box_agent.high
@@ -241,16 +242,19 @@ class Agent():
             for y in range(y_min, y_max + 1):
                 agent_state = np.array([x, y])
                 state = {"agent": agent_state, "target": target_state}
-                tensor_state = torch.tensor(self.flatten_state(state), dtype=torch.float)
+                tensor_state = self.to_tensor_state(state, env)
                 values_function[x, y] = self.policy_dqn(tensor_state).max()
         
         return values_function, target_state
                             
 
-    def flatten_state(self, state):
+    def to_tensor_state(self, state, env: Warhammer40kEnv) -> torch.Tensor:
         agent = state["agent"]
         target = state["target"]
-        return [agent[0], agent[1], target[0], target[1]]
+        flatten_state = [agent[0], agent[1], target[0], target[1]]
+        norm = 25.0
+        tensor_state = (torch.tensor(flatten_state, dtype=torch.float, device=device) - norm) / norm
+        return tensor_state
     
     def save_graph(self, rewards_per_episode, epsilon_history, loss, env):
         # compute all states of the current policy dqn

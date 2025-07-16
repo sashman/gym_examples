@@ -113,13 +113,13 @@ class Warhammer40kEnv(gym.Env):
         # reward is the inverse of the distance to the target
         # We use `np.linalg.norm` to compute the distance in L1-norm
         current_distance = np.linalg.norm(
-            self._agent_location - self._target_location, ord=1
+            self._agent_location - self._target_location, ord=2
         )
         # if current_distance == 0:
         #     bonus = 3
         # else:
         #     bonus = 0
-        normalized_distance = current_distance / (2*self.size)
+        normalized_distance = current_distance / (np.sqrt(2)*self.size)
         assert normalized_distance >= 0 and normalized_distance <= 1
         return -normalized_distance
         # return 1 if current_distance == 0 else -0.1
