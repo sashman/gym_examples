@@ -66,13 +66,15 @@ class Agent():
         self.enable_double_dqn  = hyperparameters['enable_double_dqn']      # double dqn on/off flag
 
         # Neural Network
-        self.loss_fn = nn.MSELoss()          # NN Loss function. MSE=Mean Squared Error can be swapped to something else.
+        self.loss_fn = nn.MSELoss(reduction="mean")          # NN Loss function. MSE=Mean Squared Error can be swapped to something else.
         self.optimizer = None                # NN Optimizer. Initialize later.
 
         # Path to Run info
         self.LOG_FILE   = os.path.join(RUNS_DIR, f'{self.hyperparameter_set}.log')
         self.MODEL_FILE = os.path.join(RUNS_DIR, f'{self.hyperparameter_set}.pt')
         self.GRAPH_FILE = os.path.join(RUNS_DIR, f'{self.hyperparameter_set}.png')
+
+        self.policy_dqn = None
 
     def run(self, is_training=True, render=False):
         
@@ -103,7 +105,7 @@ class Agent():
         rewards_per_episode = []
 
         # Create policy and target network. Number of nodes in the hidden layer can be adjusted.
-        policy_dqn = DQN(num_states, num_actions, self.fc1_nodes).to(device)
+        self.policy_dqn = DQN(num_states, num_actions, self.fc1_nodes).to(device)
 
         if is_training:
             # Initialize epsilon
@@ -114,10 +116,10 @@ class Agent():
 
             # Create the target network and make it identical to the policy network
             target_dqn = DQN(num_states, num_actions, self.fc1_nodes).to(device)
-            target_dqn.load_state_dict(policy_dqn.state_dict())
+            target_dqn.load_state_dict(self.policy_dqn.state_dict())
 
             # Policy network optimizer. "Adam" optimizer can be swapped to something else.
-            self.optimizer = torch.optim.Adam(policy_dqn.parameters(), lr=self.learning_rate_a)
+            self.optimizer = torch.optim.Adam(self.policy_dqn.parameters(), lr=self.learning_rate_a, weight_decay=1e-4)
 
             # List to keep track of epsilon decay
             epsilon_history = []
@@ -127,12 +129,13 @@ class Agent():
 
             # Track best reward
             best_reward = -9999999
+            minimum_loss = 9999999
         else:
             # Load learned policy
-            policy_dqn.load_state_dict(torch.load(self.MODEL_FILE))
+            self.policy_dqn.load_state_dict(torch.load(self.MODEL_FILE))
 
             # switch model to evaluation mode
-            policy_dqn.eval()
+            self.policy_dqn.eval()
 
         # Train INDEFINITELY, manually stop the run when you are satisfied (or unsatisfied) with the results
         for episode in itertools.count():
@@ -161,13 +164,13 @@ class Agent():
                         # state.unsqueeze(dim=0): Pytorch expects a batch layer, so add batch dimension i.e. tensor([1, 2, 3]) unsqueezes to tensor([[1, 2, 3]])
                         # policy_dqn returns tensor([[1], [2], [3]]), so squeeze it to tensor([1, 2, 3]).
                         # argmax finds the index of the largest element.
-                        state_input = state.unsqueeze(dim=0)
+                        # state_input = state.unsqueeze(dim=0)
                         # logger.info(f"State input: {state_input}")
                         
-                        action = policy_dqn(state.unsqueeze(dim=0)).squeeze().argmax()
+                        action = self.policy_dqn(state.unsqueeze(dim=0)).squeeze().argmax()
 
                 # Execute action. Truncated and info is not used.
-                new_state,reward,terminated,truncated,info = env.step(action.item())
+                new_state, reward, terminated, truncated, info = env.step(action.item())
                 # logger.info(f"Action: {action.item()}, Reward: {reward}, Terminated: {terminated}, Truncated: {truncated}, Info: {info}")
 
                 # Accumulate rewards
@@ -192,19 +195,10 @@ class Agent():
 
             # Save model when new best reward is obtained.
             if is_training:
-                if episode_reward > best_reward:
-                    log_message = f"{datetime.now().strftime(DATE_FORMAT)}: New best reward {episode_reward:0.1f} ({(episode_reward-best_reward)/best_reward*100:+.1f}%) at episode {episode}, saving model..."
-                    print(log_message)
-                    with open(self.LOG_FILE, 'a') as file:
-                        file.write(log_message + '\n')
-
-                    torch.save(policy_dqn.state_dict(), self.MODEL_FILE)
-                    best_reward = episode_reward
-
                 # If enough experience has been collected
-                if len(memory)>self.mini_batch_size:
+                if len(memory) > self.mini_batch_size:
                     mini_batch = memory.sample(self.mini_batch_size)
-                    current_losses = self.optimize(mini_batch, policy_dqn, target_dqn)
+                    current_losses = self.optimize(mini_batch, self.policy_dqn, target_dqn)
                     average_loss = np.mean(current_losses)
                     loss.append(average_loss)
 
@@ -214,22 +208,54 @@ class Agent():
 
                     # Copy policy network to target network after a certain number of steps
                     if step_count > self.network_sync_rate:
-                        target_dqn.load_state_dict(policy_dqn.state_dict())
+                        target_dqn.load_state_dict(self.policy_dqn.state_dict())
                         step_count=0
                         
-                            # Update graph every x seconds
+                if minimum_loss > average_loss:
+                    log_message = f"{datetime.now().strftime(DATE_FORMAT)}: New lower loss {average_loss:0.5f} at episode {episode}, saving model... Current reward: {episode_reward:0.1f}"
+                    print(log_message)
+                    with open(self.LOG_FILE, 'a') as file:
+                        file.write(log_message + '\n')
+
+                    torch.save(self.policy_dqn.state_dict(), self.MODEL_FILE)
+                    # best_reward = episode_reward
+                    minimum_loss = average_loss
+                        
+                # Update graph every x seconds
                 current_time = datetime.now()
-                if current_time - last_graph_update_time > timedelta(seconds=10):
-                    self.save_graph(rewards_per_episode, epsilon_history, loss)
+                if current_time - last_graph_update_time > timedelta(seconds=3):
+                    self.save_graph(rewards_per_episode, epsilon_history, loss, env)
                     last_graph_update_time = current_time
                     
+    def compute_policy_on_grid(self, env) -> tuple[np.ndarray, np.ndarray]:
+        box_agent = env.observation_space["agent"]
+        x_min, y_min = box_agent.low
+        x_max, y_max = box_agent.high
+
+        state, _ = env.reset() 
+
+        target_state = state["target"]
+
+        values_function = np.empty([x_max - x_min + 1, y_max - y_min + 1])
+        for x in range(x_min, x_max + 1):
+            for y in range(y_min, y_max + 1):
+                agent_state = np.array([x, y])
+                state = {"agent": agent_state, "target": target_state}
+                tensor_state = torch.tensor(self.flatten_state(state), dtype=torch.float)
+                values_function[x, y] = self.policy_dqn(tensor_state).max()
+        
+        return values_function, target_state
+                            
 
     def flatten_state(self, state):
         agent = state["agent"]
         target = state["target"]
         return [agent[0], agent[1], target[0], target[1]]
     
-    def save_graph(self, rewards_per_episode, epsilon_history, loss):
+    def save_graph(self, rewards_per_episode, epsilon_history, loss, env):
+        # compute all states of the current policy dqn
+        values_function, target_state = self.compute_policy_on_grid(env)
+        
         # Save plots
         fig = plt.figure(1, figsize=(12, 8), dpi=100)
 
@@ -249,12 +275,20 @@ class Agent():
         plt.plot(epsilon_history)
         
         # Plot loss (Y-axis) vs episodes (X-axis)
-        plt.subplot(2,2,(3, 4))
+        plt.subplot(2,2,3)
         plt.xlabel('Episodes')
         plt.ylabel('Loss')
         plt.plot(loss)
+        plt.yscale('log')
+        
+        # Plot policy on grid
+        plt.subplot(2,2,4)
+        plt.imshow(values_function)
+        plt.plot(target_state[0], target_state[1], "or")
+        plt.colorbar()
         
         plt.subplots_adjust(wspace=1.0, hspace=1.0)
+
 
         # Save plots
         fig.savefig(self.GRAPH_FILE)
@@ -286,7 +320,7 @@ class Agent():
                                 target_dqn(new_states).gather(dim=1, index=best_actions_from_policy.unsqueeze(dim=1)).squeeze()
             else:
                 # Calculate target Q values (expected returns)
-                target_q = rewards + (1-terminations) * self.discount_factor_g * target_dqn(new_states).max(dim=1)[0]
+                target_q = rewards + self.discount_factor_g * target_dqn(new_states).max(dim=1)[0]
                 '''
                     target_dqn(new_states)  ==> tensor([[1,2,3],[4,5,6]])
                         .max(dim=1)         ==> torch.return_types.max(values=tensor([3,6]), indices=tensor([3, 0, 0, 1]))
