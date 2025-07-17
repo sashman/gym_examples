@@ -252,8 +252,8 @@ class Agent():
         agent = state["agent"]
         target = state["target"]
         flatten_state = [agent[0], agent[1], target[0], target[1]]
-        norm = 25.0
-        tensor_state = (torch.tensor(flatten_state, dtype=torch.float, device=device) - norm) / norm
+
+        tensor_state = torch.tensor(flatten_state, dtype=torch.float, device=device)
         return tensor_state
     
     def save_graph(self, rewards_per_episode, epsilon_history, loss, env):

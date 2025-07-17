@@ -15,8 +15,11 @@ class Actions(Enum):
 class Warhammer40kEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 5}
 
-    def __init__(self, render_mode=None, size=50):
+    def __init__(self, render_mode=None, size=100):
         self.size = size  # The size of the square grid
+        self.play_size = size // 2
+        self.start_coord = self.play_size // 2
+        self.end_coord = self.start_coord + self.play_size
         self.window_size = 1024  # The size of the PyGame window
 
         # Observations are dictionaries with the agent's and the target's location.
@@ -77,7 +80,7 @@ class Warhammer40kEnv(gym.Env):
         super().reset(seed=seed)
 
         # Choose the agent's location uniformly at random
-        self._agent_location = self.np_random.integers(0, self.size, size=2, dtype=int)
+        self._agent_location = self.np_random.integers(self.start_coord, self.end_coord, size=2, dtype=int)
         # set agent location to a fixed position in the middle of the grid, top left corner
         # self._agent_location = np.array([0, 0], dtype=int)
         
@@ -87,7 +90,7 @@ class Warhammer40kEnv(gym.Env):
         self._target_location = self._agent_location
         while np.linalg.norm(self._target_location - self._agent_location, ord=1) < 1:
             self._target_location = self.np_random.integers(
-                0, self.size, size=2, dtype=int
+                self.start_coord, self.end_coord, size=2, dtype=int
             )
         # # set target location to a fixed position in the middle of the grid
         # self._target_location = np.array([self.size // 2, self.size // 2], dtype=int)
@@ -117,6 +120,7 @@ class Warhammer40kEnv(gym.Env):
         )
         # if current_distance == 0:
         #     bonus = 3
+        #     print("bonus")
         # else:
         #     bonus = 0
         normalized_distance = current_distance / (np.sqrt(2)*self.size)
