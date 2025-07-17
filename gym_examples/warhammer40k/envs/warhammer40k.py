@@ -77,21 +77,25 @@ class Warhammer40kEnv(gym.Env):
         super().reset(seed=seed)
 
         # Choose the agent's location uniformly at random
-        # self._agent_location = self.np_random.integers(0, self.size, size=2, dtype=int)
+        self._agent_location = self.np_random.integers(0, self.size, size=2, dtype=int)
         # set agent location to a fixed position in the middle of the grid, top left corner
-        self._agent_location = np.array([0, 0], dtype=int)
+        # self._agent_location = np.array([0, 0], dtype=int)
         
 
         # We will sample the target's location randomly until it does not
         # coincide with the agent's location
-        # self._target_location = self._agent_location
-        # while np.array_equal(self._target_location, self._agent_location):
-        #     self._target_location = self.np_random.integers(
-        #         0, self.size, size=2, dtype=int
-        #     )
+        self._target_location = self._agent_location
+        while np.linalg.norm(self._target_location - self._agent_location, ord=1) < 1:
+            self._target_location = self.np_random.integers(
+                0, self.size, size=2, dtype=int
+            )
+        # # set target location to a fixed position in the middle of the grid
+        # self._target_location = np.array([self.size // 2, self.size // 2], dtype=int)
+            
+        self._initial_distance = np.linalg.norm(
+            self._agent_location - self._target_location, ord=1
+        )
         
-        # set target location to a fixed position in the middle of the grid
-        self._target_location = np.array([self.size // 2, self.size // 2], dtype=int)
 
         observation = self._get_obs()
         info = self._get_info()
@@ -108,10 +112,18 @@ class Warhammer40kEnv(gym.Env):
         
         # reward is the inverse of the distance to the target
         # We use `np.linalg.norm` to compute the distance in L1-norm
-        return -np.linalg.norm(
-            self._agent_location - self._target_location, ord=1
+        current_distance = np.linalg.norm(
+            self._agent_location - self._target_location, ord=2
         )
-    
+        # if current_distance == 0:
+        #     bonus = 3
+        # else:
+        #     bonus = 0
+        normalized_distance = current_distance / (np.sqrt(2)*self.size)
+        assert normalized_distance >= 0 and normalized_distance <= 1
+        return -normalized_distance
+        # return 1 if current_distance == 0 else -0.1
+        
     def step(self, action):
         # Map the action (element of {0,1,2,3}) to the direction we walk in
         direction = self._action_to_direction[action]
