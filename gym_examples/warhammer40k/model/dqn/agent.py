@@ -287,7 +287,7 @@ class Agent():
         
         # Plot policy on grid
         plt.subplot(2,2,4)
-        plt.imshow(values_function)
+        plt.imshow(values_function.T, origin='upper')
         plt.plot(target_state[0], target_state[1], "or")
         plt.colorbar()
         
